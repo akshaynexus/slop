@@ -3,7 +3,7 @@
 @@ -61,7 +61,17 @@
  #define NEGRONI_FB_NOTIFY_TYPES           8
  #define NEGRONI_FB_NOTIFY_VSYNC           5
- #define NEGRONI_FB_VSYNC_US               16667
+ #define NEGRONI_FB_VSYNC_US               8333    /* 120 Hz, the panel's native rate */
 -#define NEGRONI_FB_DOT_PITCH              395     /* ppi, 6.67" 1080x2400 */
 +#define NEGRONI_FB_DOT_PITCH              458     /* ppi, as the iPhone X panel */
 +/*

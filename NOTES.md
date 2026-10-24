@@ -1,6 +1,19 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## 2026-10-25 Negroni vsync 120 Hz
+
+- Patches 0046/0056/0061: `NEGRONI_FB_VSYNC_US` 16667 -> 8333 (the AMB670YF08 panel scans at
+  120 Hz, the vsync timer was the 60 Hz limiter); `fFlushTicks` now derives from
+  `1000000u / NEGRONI_FB_VSYNC_US` instead of a hardcoded 60, so `negronifb_hz`
+  (panel copies per second, default 10) keeps its meaning at any vsync rate.
+- No MobileGestalt/ProMotion gate found in the 20H392 dyld shared cache: iOS takes the
+  rate from the driver, so no device-identity change is needed.
+- `scripts/kernel/prepare-src.sh` re-run: 129 applied, 4 skipped (the usual TrustCache /
+  iobuffermemd / skywalk / syntax_checker), all three touched patches applied.
+- NOT yet built into a kernel image and NOT yet booted on the phone.
+
 ## 2026-10-22 Negroni Windows Adreno 730 research
+
 
 - User clarified the target is a Windows ARM64 GPU driver for the new Windows install, not the earlier iOS Metal backport. Added `windows/NegroniGpu/README.md` with requirements, safe milestones, and references. No Windows driver code was built, no GPU driver was installed, and the phone/Windows image was not modified for this work.
 - No ready A730 Windows package found in the Qualcomm WoA driver project; its Snapdragon 8 Gen 1 request (#101) remains open without an implementation linked. Android KGSL/Adreno binaries are not Windows WDDM drivers.

@@ -1014,7 +1014,7 @@
 + * Everything else is accepted and logged once.
 + *
 + * SwapEnd copies the enabled layers' surfaces into the panel memory (no
-+ * scaling, CPU copy). Vsync (notification type 5) is a 60 Hz timer that
++ * scaling, CPU copy). Vsync (notification type 5) is a 120 Hz timer that
 + * sends (count, mach_absolute_time, 0) as 32-bit halves to clients that
 + * enabled it, through the port they registered (IOConnectSetNotificationPort).
 + *
@@ -1054,7 +1054,7 @@
 +#define NEGRONI_FB_LAYERS                 4
 +#define NEGRONI_FB_NOTIFY_TYPES           8
 +#define NEGRONI_FB_NOTIFY_VSYNC           5
-+#define NEGRONI_FB_VSYNC_US               16667
++#define NEGRONI_FB_VSYNC_US               8333    /* 120 Hz, the panel's native rate */
 +#define NEGRONI_FB_DOT_PITCH              395     /* ppi, 6.67" 1080x2400 */
 +#define NEGRONI_FB_FORMAT_BGRA            0x42475241
 +
