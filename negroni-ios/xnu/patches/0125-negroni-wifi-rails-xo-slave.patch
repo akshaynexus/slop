@@ -1,0 +1,36 @@
+diff --git a/bsd/dev/negroni_wifi.c b/bsd/dev/negroni_wifi.c
+index 6d988e5..748e5a8 100644
+--- a/bsd/dev/negroni_wifi.c
++++ b/bsd/dev/negroni_wifi.c
+@@ -89,6 +89,7 @@ uint32_t negroni_wifi_badge_color = 0x00606060;
+ #define GCC_VOTE_2_PCIE0        0x3fu
+ #define WLAN_EN_PIN             80
+ #define PERST_PIN               94
++#define XO_CLK_PIN              204     /* DT wcn6855-pmu xo-clk-gpios */
+ #define CHIP_ID                 0x110317cbu     /* 17cb:1103 */
+ 
+ static uint32_t pause_ms = 300;
+@@ -324,7 +325,14 @@ step_chip_on(void)
+ 			return false;
+ 		}
+ 	}
++	/* Linux pwrseq-qcom-wcn (wcn6855): XO clock pin high, WLAN_EN high, then the XO pin low and 50 ms */
++	gpio_out(XO_CLK_PIN, false);
++	delay(10000);
++	gpio_out(XO_CLK_PIN, true);
++	delay(200);
+ 	gpio_out(WLAN_EN_PIN, true);
++	delay(10000);
++	gpio_out(XO_CLK_PIN, false);
+ 	delay(50000);
+ 	printf("NEGRONI WIFI: 6 WLAN_EN out %u, PERST out %u, SW_CTRL in %u\n", (rd(tlmm + TLMM_PIN(WLAN_EN_PIN) + 4) >> 1) & 1,
+ 	    (rd(tlmm + TLMM_PIN(PERST_PIN) + 4) >> 1) & 1, rd(tlmm + TLMM_PIN(82) + 4) & 1);
+@@ -359,6 +367,8 @@ step_phy(void)
+ 	wr(parf + PARF_DBI_BASE_ADDR_V2_HI, 0);
+ 	wr(parf + PARF_ATU_BASE_ADDR, (uint32_t)(DBI_PHYS + ATU_OFFSET));
+ 	wr(parf + PARF_ATU_BASE_ADDR_HI, 0);
++	wr(parf + 0x358, 0);                                    /* PARF_SLV_ADDR_SPACE_SIZE_V2: without it DBI, iATU */
++	wr(parf + 0x35c, 0x80000000);                           /* and bus 1 read 0xffffffff */
+ 	clear(parf + PARF_SYS_CTRL, 1u << 29);                  /* MAC_PHY_POWERDOWN_IN_P2_D_MUX_EN */
+ 	set(parf + PARF_MHI_CLOCK_RESET_CTRL, 1u << 4);         /* BYPASS */
+ 	clear(parf + PARF_PM_CTRL, 1u << 5);                    /* REQ_NOT_ENTR_L1 */

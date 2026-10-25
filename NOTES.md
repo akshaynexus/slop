@@ -12,8 +12,18 @@
   iobuffermemd / skywalk / syntax_checker), all three touched patches applied.
 - NOT yet built into a kernel image and NOT yet booted on the phone.
 
-## 2026-10-22 Negroni Windows Adreno 730 research
+## 2026-10-25 iOS 18 first boot: cryptexd crash loop, fixed in place
 
+- Observed (SWEETLOG from OrangeFox): iOS 18.7.8 boots and runs up to bluetoothd; `cryptexd` crash-loops with sig 5 (trap in libimage4, pc 0x27506ce70) on every relaunch. Bergamota removes the job (root_tweaks18 QUIET_REMOVE).
+- `tools/sweet-root-tweaks.py` now drops `com.apple.security.cryptexd` for 22xxx builds (637b6b5). The local image `~/ios-work/ios18-root-full.img` was edited too (job removed), but its .simg was NOT regenerated.
+- The phone's HFS+ had changed a lot since the flash (about 2k files and 80k blocks; writeCount 0x164e9), so the image's block diff was NOT written. Instead launchd.plist was patched on the phone: in the LaunchDaemons dict, the 2-byte value ref of `/System/Library/LaunchDaemons/com.apple.security.cryptexd.plist` now points at an existing empty dict (obj 1899; it was 19000). Same file size, no metadata change. sda14 4K block 2807886, file offset 309099; written and read back OK. Original block: `~/ios-work/launchd-blk2807886-orig.bin` (dd it back with seek=2807886 to revert).
+- GPT checked against `negroni-gpt/sda-gpt-andromeda-split.bin`: userdata/esp/win entries identical; only the vbmeta_system/vbmeta_vendor A/B type GUIDs are swapped (slot bookkeeping) plus the CRCs. Not restored.
+- boot_a held a different (OrangeFox?) image; backed up to `~/ios-work/boot_a-before-ios18-restore-10250459.img` and rewritten with `unixnu/out/boot_a-ios18.img` (21ebe831). vendor_boot_a (77424da2), vbmeta_a flags 3 (efc6c16a) and dtbo_a zeroed, all verified.
+- Then, at the user's request: GPT primary + backup rewritten to the andromeda-split entries (vbmeta_system/vbmeta_vendor type GUIDs swapped back), read back OK; pre-revert copies in `~/ios-work/negroni-gpt/sda-*-before-revert-1025.bin`. The in-place patch was superseded by a full userdata rewrite with the fixed image.
+- Streaming the raw image with `adb exec-in "dd of=/dev/block/sda14"` from OrangeFox CORRUPTED it (sizes matched and adb exited 0, but 21 of 22 GiB hashed differently; the phone's data was shifted by 128 bytes against the image). Don't use it. Reflashed with `fastboot -S 256M flash userdata ~/ios-work/ios18-root-full.simg` (regenerated 05:35, 17988865756 bytes): 69/69 chunks OKAY, 1006 s. Then `fastboot reboot`.
+- Next: check that the iOS 18 log has no cryptexd exec/CRASH lines.
+
+## 2026-10-22 Negroni Windows Adreno 730 research
 
 - User clarified the target is a Windows ARM64 GPU driver for the new Windows install, not the earlier iOS Metal backport. Added `windows/NegroniGpu/README.md` with requirements, safe milestones, and references. No Windows driver code was built, no GPU driver was installed, and the phone/Windows image was not modified for this work.
 - No ready A730 Windows package found in the Qualcomm WoA driver project; its Snapdragon 8 Gen 1 request (#101) remains open without an implementation linked. Android KGSL/Adreno binaries are not Windows WDDM drivers.
@@ -824,3 +834,60 @@ What it took today (in order): 0058 HID services (Apple IOHIDFamily-1915 user cl
 - Validation: ABI ASan/UBSan tests passed malformed fields/lengths/version/operation/reserved data, unaligned buffers, unchanged-on-rejection output and no false render claims. Native x64 Windows tests with mock D3DKMT calls passed open failure, escape failure, malformed reply, unsupported render claims, success and all handle cleanup. No real adapter calls were made by those tests. Existing PM4/queue/firmware host tests passed against target phone blobs. Pre-existing dirty PM4 source/tests from another session were preserved and are not included in this checkpoint's commit.
 - Debugged native test loader failure: same x64 objects linked as console subsystem 10.00 exit before entry with `0xc000007b`; 6.02 loads and passes. Only user-mode build/test scripts use 6.02; kernel subsystem remains unchanged. Final ARM64 client SHA256 `ee88a86d741df8b79259339d05764c370dc0aa53fee59ade18141a988a6dbe28`, KMD `f4c4e36325b12e4bef3bb99af2da29b24e50ef5a964a39ff3fe36fdc26c80491`. ARM64 static archive `windows/NegroniGpu/out/NegroniGpuWinsys.lib` contains the actual transport and ABI objects. ARM64 builds passed; WDK headers retain their existing pragma warnings, no own-source diagnostics. Offline INF package regenerated with the KMD and private phone firmware, Inf2Cat passed without errors/warnings. Package remains **DO NOT INSTALL**; nothing was installed/flashed on the phone. Source checkpoint committed as `e7a86e8`.
 - Next Windows work: implement the documented render-only WDDM allocation/context/paging/submission/interrupt/reset contracts, authenticated firmware/SMMU ownership with safe unwind, then a real Mesa backend and paired D3D UMD. The query client can validate the real protocol only after a complete KMD can create an adapter on Windows; current handshake tests are mocks. Do not present the transport archive or catalog as a functioning Freedreno driver.
+
+## 2026-10-23 Windows A730 software context lifecycle checkpoint (907675e)
+
+- Continued Windows-only work per user request; no phone access, reboot, install or flash. Local source commit `907675e` adds CreateDevice/DestroyDevice and CreateContext/DestroyContext callbacks with CPU-side ownership. Fast-mutex child accounting defers device freeing until the last child closes. No adapter/MMIO pointer is retained; future hardware resources must add adapter stop/remove/reset lifetime management. Only physical-address ordinary/system contexts on node 0 / engine mask 1 are accepted. Unsupported GDI/GPUVA/protected/hardware queue/private payload and device PASID/process requests fail without changing outputs. No arbitrary device/context count limit.
+- Validation: production object source passed host ASan/UBSan with mock allocation and pthread locks: failed allocations, reserved flags, engine/node/private data rejection, unchanged failure output, normal and parent-first teardown, 512 children destroyed across eight threads. Existing ABI/PM4/queue/firmware tests passed. Actual WDK ARM64 cross-compile and link passed; header warnings remain, no own-source diagnostics. `windows/NegroniGpu/out/NegroniGpuWddm.sys` SHA256 `20733e7c9465bc7848baeda12d1979a7d21d7bfc98cc649637a89b6712f2a176`. Build includes pre-existing uncommitted PM4 changes; those changes were preserved and excluded from this commit. Offline package was NOT regenerated and still contains the previous prototype.
+- Limits: these are software objects and a future DMA staging contract, not hardware contexts or working acceleration. Driver caps/rendering remain unadvertised; no allocations/paging/submission/reset/interrupt implementation or real Windows adapter test. No CI run or push for this checkpoint. Next implement validated allocation and paging ownership, then hardware/SMMU/firmware execution and the Mesa/UMD bridge; retain fail-closed behavior until the full path is proven.
+
+- 2026-10-23 user-requested rebuild: `build-wddm-prototype.sh` completed successfully (exit 0), producing ARM64 PE32+ native `C:\Users\paw\ios-sweet\windows\NegroniGpu\out\NegroniGpuWddm.sys`, SHA256 `42e1962e8419ff688a40d30f13c97f7e00db59f11f8e97ccfb13f1d386d09fca`. Same source checkpoint plus preserved dirty PM4 changes; no source edits, package refresh, signing, push or device access. Still an incomplete non-installable prototype without acceleration.
+
+## 2026-10-23 userdata split for Andromeda (user-approved, iOS kept)
+- GPT before: b919ff2f… (= 22 Oct original), saved ~/ios-work/negroni-gpt/sda-gpt-before-andromeda.bin.
+- New (4K sectors): 14 userdata 2839276-9130731 (24 GiB, same type 1B81E7E6… and unique GUID B0B9F713…),
+  15 esp 9130732-9261803 (512 MiB, EF00, FAT32 "ESP", fsck clean), 16 win 9261804-30271482 (80.1 GiB, 0700,
+  unformatted: format NTFS from Windows over Mu mass storage). sgdisk --verify clean (same 2 warnings as before).
+  Backup after: ~/ios-work/negroni-gpt/sda-gpt-andromeda-split.bin (efb29ca1…).
+- iOS root intact (HX at byte 1024). GPU fwarea.bin rewritten at userdata block 6288383 (new end - 1025 - 2048),
+  verified b25a66ae…. Log ring moves to the new end automatically.
+- Andromeda: the Lumia 950 build 17686 is 32-bit ARM; SM8450 cores are AArch64-only -> needs an ARM64 build
+  (Surface Duo era). Slot A boot chain is STOCK right now (OrangeFox); restore the iOS chain before booting iOS.
+- **2026-10-23 Windows GPU test prep:** NegroniGpu page tables (ea559ad); Mu fork bed75185: GpuSsdt (QCOM0A73,
+  7 MMIO windows, no IRQ) in the negroni ACPI set. Image ~/ios-work/winpe/boot_a-windows-gpu.img (sha 1c810296…),
+  without NegroniPcieDxe. Signed package windows/NegroniGpu/out/package (cat e1b53851…, sys fdf79a5f…). The KMD
+  only loads, maps its windows, validates firmware and reads the GPU power state; no render path. Recovery if
+  Windows boot-loops: mass storage, offline SYSTEM hive, Services\NegroniGpuWddm Start=4.
+- **2026-10-23 Windows Wi-Fi: PCIe0 LINK UP under Mu, QCA6490 17cb:1103 answers** (user, Wi-Fi diagnostics entry).
+  Mu fork (local, not pushed after ff4efe42): PARF_SLV_ADDR_SPACE_SIZE_V2/_HI (0/0x80000000; without it DBI,
+  iATU and bus 1 read ffffffff and the "link up" was fake), wcn6855 power order with XO clock GPIO204, RPMh
+  votes from apps RSC DRV2 TCS 2 for smpb10 1800 / smpb11 966 / smpb12 1350 / smpc1 1900 / smpe2 1012 mV
+  (cmd-db addresses; before them SW_CTRL 0, LTSSM stuck in Detect). Image ~/ios-work/winpe/
+  boot_a-windows-wifidiag.img (294976d9…), also touch reports only real changes + SWM errors-only (lag fix).
+  The iOS patch 0120 lacks all three fixes. Next: ACPI PCI0 + MCFG, then qcwlan8350 + bdwlan.
+
+## 2026-10-24 Windows USB hub investigation and enumeration candidate
+
+- User requested USB host/hub support on the OnePlus. Active Mu Negroni ACPI included no URS/USB host controller: shared Waipio DSDT explicitly says USB removed; device SSDT contained buttons only. This is an observed enumeration gap, not proof of the sole cause of USB failure. USB firmware DXEs were already included; the original UsbConfigDxe remains untouched, preserving the existing Mu mass-storage role path.
+- Added `uefi/negroni/acpi/UsbSsdt.asl` and ACPI INF entry. Minimal documented URS parent with host ADR 0 and function ADR 1; QCOM0497 from same-SM8450 ingres reference. MMIO 0x0a600000 length 0xfc100 and controller GSI 0xa5 verified against local negroni DTB (SPI 133 + 32). No copied guessed CCVL/PHYC methods, connector orientation/VBUS GPIO writes, forced host role, speculative wake interrupts or port numbering. This is enumeration only: compatible Windows Qualcomm role/connector/PHY drivers, power and SMMU handoff remain unverified. No matching USB OEM INF was found in inspected local driver directories. Do not claim hub support works yet.
+- ACPICA 20250404 compile passed with zero errors/warnings/remarks. Mu DEBUG passed (78 images validated), then shim packaging succeeded using `SYNC_TOUCH_HEADERS=0` and `noflash`. Added optional touch-sync guard to shim-mu.sh; first build was stopped after noticing its default copy of canonical touch headers changed the active Mu source. Restored only those seven files changed by that invocation and rebuilt with original active touch sources. Existing dirty Mu_Basecore submodule preserved.
+- Candidate: `C:\Users\paw\ios-sweet\shim\out\negroni-uefi\boot_a-windows-usb-enum.img`, SHA256 `04cd1cb0af8bad78f3e368f873dcdb2cc9a1ebf348596cdf5f967682ea04b1be`. Prior generic image backed up next to it before build. External ACPI commit `0e41763`, Mu pointer commit `5abc082e`, local only. No phone access, flash, role changes or Windows driver installation. Candidate includes the current Mu PCIe/GPU ACPI from the other session.
+- Added read-only `windows/diag/usb-host-diag.ps1` (PowerShell parser check passed). Run on phone Windows before/after hub attachment to capture QCOM0497/URS/UCM/USB devices, INF/service bindings, problem codes/status, controller/hub listings and recent PnP events. Not run on the phone. Next: obtain current report, test candidate under coordinated access, then resolve actual driver binding/connector/VBUS failures. Do not force booster GPIO64 or OVP GPIO57 without negotiated cable/power-role evidence. Wi-Fi Code 12 and A730 Code 37 remain separate unfinished requests; latest user prioritized USB.
+
+## 2026-10-25 iOS 18 port (Bergamota approach: iOS 18.7.8 iPhone11,8 userland, iPhone X D22 identity, xnu-8796)
+- Reference: github.com/ry-diffusion/Bergamota branch ios18 (iOS 18 SpringBoard on the Poco F1, 2026-10-23).
+- Kernel: xnu-C branch `ios18` (aac38b6, 8dae5a0) = Bergamota 0131 0135 0136 0138-0143 0147 0154 0156 0157 0159
+  0160 + prerequisites 0099 0106 0116 0119-0123, renamed sweet->negroni; 0147 hooked after exec_extract_strings;
+  0097 dropped (our framebuffer copies at swap time); diagnostics 0144-0146/0148-0153/0155, BT 0132/0133, USB 0158
+  not taken. Exported as negroni-ios/xnu/patches-ios18/0126-ios18-userland.patch (26 files, +1852). CI input
+  `ios18` (workflow change 8279a34). NOT BUILT: the push was blocked by the permission check (18 local commits).
+- Userland: ~/ios-work/ios18/ipsw/22H352__iPhone11,8/094-{31934,32062,32850}-020.dmg (decrypted, ipsw 3.1.739 in
+  ~/ios-work/tools/bin). negroni-ios/tools/build-ios18-root.sh (sudo): mkiosroot.sh 22G + root tweaks with
+  NEGRONI_IOS_BUILD=22H352 (+ D22 event timing, LaunchServices reset) + staged apps + Sileo -> ios18-root-full.simg.
+  No pacstrip: SM8450 has PAuth and the kernel leaves the keys off (PAC = pass-through), so Apple's signatures stay
+  valid. Unverified; fallback = Bergamota tools/ios18/pacstrip*.py. Boot args: + negroniarm64e=1, no GPU.
+- **2026-10-25 iOS 18 ready to flash:** kernel CI 40185294317 (0122 supply votes + 0125 rebased + 0126 ios18, all
+  applied). Root ~/ios-work/ios18-root-full.simg (18 GB used, 229 apps, Sileo); warning: no mobileactivationd
+  container -> activation data ark skipped. WSL kernel lacks hfsplus: `sudo insmod ~/ios-work/tools/wsl-kernel/fs/
+  hfsplus/hfsplus.ko` after every WSL restart. Boot image unixnu/out/boot_a-ios18.img (21ebe831…): negroniarm64e=1
+  ufslogsecs=1, no GPU, Mu WITHOUT NegroniWindowsFirstDxe/PcieDxe (Windows on win/esp would otherwise boot first).
